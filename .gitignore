@@ -10,3 +10,9 @@ coverage/
 __pycache__/
 *.py[cod]
 .DS_Store
+
+# 采集端运行产物（状态、原件、证据、交接单），不提交到版本库
+workdir/
+work/
+runs/
+PAUSE
