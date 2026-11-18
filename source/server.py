@@ -40,12 +40,15 @@ class Source:
 
     def product(self,method,path,q,h,body):
         jobs=self.extra.setdefault('jobs',[])
-        if path=='/':return 200,{},(DATA/'portal.html').read_text(encoding='utf-8')
+        if path=='/':
+            session=self.extra.setdefault('session','local-browser-session')
+            return 200,{'Set-Cookie':'source_session='+session+'; Path=/; SameSite=Strict'},(DATA/'portal.html').read_text(encoding='utf-8')
         if path=='/context':
             company=q.get('company','C01');year=q.get('year','2025')
             return 200,{}, {'company':company,'year':year,'scope':'集团' if company=='C01' else '单体','label':'同名实业','ready':True}
         if path=='/apply' and method=='POST':
             v=json.loads(body); key='E-'+str(len(jobs)+1)
+            if any(self.clock<x['ready_at'] for x in jobs):return 409,{}, {'error':'已有导出正在办理'}
             jobs.append({'id':key,'company':v['company'],'year':v['year'],'scope':v['scope'],'created':self.clock,'visible':self.clock+(2 if self.phase==1 else 0),'ready_at':self.clock+3,'actor':'operator' if self.phase==2 else 'automatic','files':['main','supplement']})
             if self.phase==1:return 0,{},b''
             return 201,{}, {'accepted':key,'quota_used':len(jobs)}
@@ -55,9 +58,10 @@ class Source:
         if path=='/ticket':
             job=next(x for x in jobs if x['id']==q['id'])
             if self.clock<job['ready_at']:return 409,{}, {'error':'仍在处理'}
-            return 200,{}, {'links':[{'part':part,'url':f'/download/{job["id"]}/{part}?expires={self.clock+4}&session='+q.get('session','browser')} for part in job['files']]}
+            return 200,{}, {'links':[{'part':part,'url':f'/download/{job["id"]}/{part}?expires={self.clock+4}&session='+self.extra.get('session','local-browser-session')} for part in job['files']]}
         if path.startswith('/download/'):
             _,_,key,part=path.split('/');job=next(x for x in jobs if x['id']==key)
+            if q.get('session')!=self.extra.get('session','local-browser-session') or 'source_session='+q.get('session','') not in h.get('cookie',''):return 403,{}, {'error':'下载会话不符'}
             if self.clock>int(q['expires']):return 410,{}, {'error':'下载会话过期'}
             if self.phase==3 and part=='supplement':return 503,{}, {'error':'补充册暂不可用'}
             return 200,{'Content-Type':'text/plain; charset=utf-8','Content-Disposition':f'attachment; filename="{key}-{part}.txt"'},json.dumps({'application':key,'company':job['company'],'year':job['year'],'scope':job['scope'],'part':part},ensure_ascii=False).encode()
